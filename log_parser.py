@@ -3,9 +3,11 @@ Parsing Collected NTP Logs
 
 Oisín Mc Laughlin - 22441106
 """
-
+from collections import defaultdict
 from datetime import datetime
 import re
+import os
+import csv
 
 INPUT_FILE = "ntp-logs/ntplog.txt"
 OUTPUT_DIR = "parsed-ntp-logs"
@@ -17,19 +19,15 @@ SERVER_NAMES = {
     'time-a-g.nist.g': 'US',
     'ntp1.tuxfamily.org': 'France',
     'ns1.anu.edu.au': 'Australia',
-    'ntp-b3.nict.go': 'Japan'
+    'ntp-b3.nict.go.': 'Japan'
 }
 
 
 def parse_ntp_log(input_file):
     """
-    Parse NTP log file and return structured data
-
-    Args:
-        input_file: Path to the ntplog.txt file
-
-    Returns:
-        List of dictionaries containing parsed data
+    Parses the NTP log file and extracts relevant data points.
+    :param input_file: Path to NTP log file
+    :return: List of dictionaries containing parsed data points
     """
     data_rows = []
     current_timestamp = None
@@ -119,4 +117,110 @@ def parse_ntp_log(input_file):
     return data_rows
 
 
-parse_ntp_log(INPUT_FILE)
+def write_main_csv(data_rows, output_dir):
+    """
+    Writes the parsed NTP data to a main CSV file.
+    :param data_rows: List of dictionaries containing parsed data points
+    :param output_dir: Directory to save the output CSV file
+    :return: Path to the created CSV file
+    """
+
+    output_file = os.path.join(output_dir, "ntp_data_all.csv")
+
+    fieldnames = ['timestamp', 'status', 'remote', 'refid', 'stratum', 'type',
+                  'when_seconds', 'poll', 'reach', 'delay_ms', 'offset_ms', 'jitter_ms']
+
+    with open(output_file, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in data_rows:
+            row_copy = row.copy()
+            row_copy.pop('timestamp_obj', None)
+            writer.writerows([row_copy])
+
+    print(f"Created: {output_file}")
+    return output_file
+
+
+def write_combined_csv(data_rows, output_dir):
+    """
+    Writes a combined CSV file that includes the server location based on the remote server IP or hostname.
+    :param data_rows: List of dictionaries containing parsed data points
+    :param output_dir: Directory to save the output CSV file
+    :return: Path to the created CSV file
+    """
+
+    output_file = os.path.join(output_dir, "ntp_data_with_locations.csv")
+
+    with open(output_file, 'w', newline='') as f:
+        fieldnames = ['timestamp', 'location', 'server', 'delay_ms', 'offset_ms', 'jitter_ms']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for row in data_rows:
+            server = row['remote']
+            location = SERVER_NAMES.get(server, server)
+            writer.writerow({
+                'timestamp': row['timestamp'],
+                'location': location,
+                'server': server,
+                'delay_ms': row['delay_ms'],
+                'offset_ms': row['offset_ms'],
+                'jitter_ms': row['jitter_ms']
+            })
+
+    print(f"Created: {output_file}")
+    return output_file
+
+
+def write_per_server_files(data_rows, output_dir):
+    """
+        Writes separate CSV files for each server, containing only the relevant data points for that server.
+    :param data_rows: List of dictionaries containing parsed data points
+    :param output_dir: Directory to save the output CSV files
+    :return: List of paths to the created CSV files
+    """
+
+    servers_data = defaultdict(list) # Group data by server
+
+    for row in data_rows:
+        server = row['remote']
+        servers_data[server].append(row)
+
+    files_created = []
+
+    for server, data in servers_data.items():
+        location_name = SERVER_NAMES.get(server, server.replace('.', '_'))
+        filename = os.path.join(output_dir, f"{location_name}.csv")
+
+        with open(filename, 'w', newline='') as f:
+            fieldnames = ['timestamp', 'delay_ms', 'offset_ms', 'jitter_ms']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for row in data:
+                writer.writerow({
+                    'timestamp': row['timestamp'],
+                    'delay_ms': row['delay_ms'],
+                    'offset_ms': row['offset_ms'],
+                    'jitter_ms': row['jitter_ms']
+                })
+
+        files_created.append(filename)
+        print(f"Created: {filename}")
+
+    return files_created
+
+
+def main():
+    data_rows = parse_ntp_log(INPUT_FILE)
+
+    write_main_csv(data_rows, OUTPUT_DIR)
+
+    write_combined_csv(data_rows, OUTPUT_DIR)
+
+    write_per_server_files(data_rows, OUTPUT_DIR)
+
+
+if __name__ == "__main__":
+    main()
