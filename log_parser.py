@@ -9,6 +9,8 @@ import re
 import os
 import csv
 import statistics
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 INPUT_FILE = "ntp-logs/ntplog.txt"
 OUTPUT_DIR = "parsed-ntp-logs"
@@ -271,7 +273,7 @@ def calculate_statistics(data_rows):
         print(f"  Min:    {jitter_stats['min']:.4f}")
         print(f"  Max:    {jitter_stats['max']:.4f}")
         print(f"  Mean:   {jitter_stats['mean']:.4f}")
-        print(f"  StdDev: {jitter_stats['stdev']:.¢4f}")
+        print(f"  StdDev: {jitter_stats['stdev']:.4f}")
 
         stats.append({
             'Server': location,
@@ -316,6 +318,89 @@ def write_statistics_summary(stats, output_dir):
     print(f"\nCreated statistics summary: {output_file}")
 
 
+def create_plots(data_rows, output_dir):
+    """
+    Creates line plots for delay and jitter over time for each server.
+    :param data_rows: List of dictionaries containing parsed data points
+    :param output_dir: Directory to save the output plot images
+    :return: None
+    """
+
+    # Group data by server
+    servers = defaultdict(lambda: {'time': [], 'delay': [], 'jitter': []})
+    for row in data_rows:
+        servers[row['remote']]['time'].append(row['timestamp_obj'])
+        servers[row['remote']]['delay'].append(row['delay_ms'])
+        servers[row['remote']]['jitter'].append(row['jitter_ms'])
+
+    # Plot delay
+    plt.figure(figsize=(12, 6))
+    for server, data in servers.items():
+        # filter out any entries without a valid timestamp
+        times = []
+        values = []
+        for t, v in zip(data['time'], data['delay']):
+            if t is None:
+                continue
+            times.append(t)
+            values.append(v)
+        if not times:
+            continue
+        plt.plot(times, values, marker='o', label=SERVER_NAMES.get(server, server))
+    plt.xlabel('Time (UTC)')
+    plt.ylabel('Delay (ms)')
+    plt.title('NTP Server Delay')
+    plt.legend()
+    plt.grid(True)
+
+    ax = plt.gca()
+    locator = mdates.AutoDateLocator()
+    try:
+        formatter = mdates.ConciseDateFormatter(locator)
+    except AttributeError:
+        formatter = mdates.DateFormatter('%Y-%m-%d %H:%M')
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
+
+    fig = plt.gcf()
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'delay_plot.png'))
+    plt.show()
+
+    # Plot jitter
+    plt.figure(figsize=(12, 6))
+    for server, data in servers.items():
+        times = []
+        values = []
+        for t, v in zip(data['time'], data['jitter']):
+            if t is None:
+                continue
+            times.append(t)
+            values.append(v)
+        if not times:
+            continue
+        plt.plot(times, values, label=SERVER_NAMES.get(server, server), alpha=0.5)
+    plt.xlabel('Time (UTC)')
+    plt.ylabel('Jitter (ms)')
+    plt.title('NTP Server Jitter')
+    plt.legend()
+    plt.grid(True)
+
+    # Apply the same date formatting for the jitter plot
+    ax = plt.gca()
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
+    fig = plt.gcf()
+    fig.autofmt_xdate()
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'jitter_plot.png'))
+    plt.show()
+
+    print(f"Created: {os.path.join(output_dir, 'delay_plot.png')}")
+    print(f"Created: {os.path.join(output_dir, 'jitter_plot.png')}")
+
+
 def main():
     data_rows = parse_ntp_log(INPUT_FILE)
     write_main_csv(data_rows, OUTPUT_DIR)
@@ -324,6 +409,8 @@ def main():
 
     stats = calculate_statistics(data_rows)
     write_statistics_summary(stats, OUTPUT_DIR)
+
+    create_plots(data_rows, OUTPUT_DIR)
 
 
 if __name__ == "__main__":
